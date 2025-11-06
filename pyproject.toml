@@ -8,15 +8,21 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "transformers",
-    "torch",
-    "nnsight",
+    "transformers==4.56.2",
+    "torch==2.8.0",
+    "nnsight~=0.3.3",
     "numpy",
     "pydantic",
 ]
 
 [project.scripts]
 hf_example_repo = "main:main"
+hf_examples = "examples:main"
+hf_gpt2_example = "gpt2_example:main"
+hf_working_gpt2_example = "working_gpt2_example:main"
+hf_minimal_gpt2_example = "minimal_gpt2_example:main"
+hf_debug_gpt2_config = "debug_gpt2_config:main"
+hf_activation_grabber_example = "activation_grabber_example:main"
 
 [build-system]
 requires = ["uv_build>=0.9.7,<0.10.0"]
