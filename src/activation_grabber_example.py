@@ -4,8 +4,8 @@
 Example script demonstrating how to use the ActivationGrabber with a Subject instance.
 """
 
+from hf_example_repo.activiation_grabber import ActivationConfig, ActivationData, ActivationGrabber
 from hf_example_repo.subject import get_subject_config, make_subject
-from hf_example_repo.activiation_grabber import ActivationGrabber, ActivationData, ActivationConfig
 
 
 def main() -> None:

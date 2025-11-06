@@ -5,7 +5,7 @@ Minimal example script demonstrating how to create and use a Subject instance wi
 This example shows the structure without actually loading the full model.
 """
 
-from hf_example_repo.subject import get_subject_config, make_subject, Subject, GPT2Config
+from hf_example_repo.subject import GPT2Config, Subject, get_subject_config, make_subject
 
 
 def main() -> None:

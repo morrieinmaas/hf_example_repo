@@ -7,12 +7,12 @@ Example script demonstrating how to instantiate and use Subject objects.
 # Import the necessary modules
 try:
     from hf_example_repo.subject import (
-        Subject,
         LMConfig,
-        llama3_8B_config,
+        Subject,
         get_subject_config,
-        make_subject,
         gpt2_config,
+        llama3_8B_config,
+        make_subject,
     )
 
     print("Successfully imported Subject and related classes")

@@ -1,4 +1,5 @@
 from typing import Any, List, NamedTuple
+
 import numpy as np
 
 # Type aliases

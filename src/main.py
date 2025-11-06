@@ -1,5 +1,5 @@
-from hf_example_repo.subject import Subject
 from hf_example_repo.activiation_grabber import ActiviationGrabber
+from hf_example_repo.subject import Subject
 
 
 def main() -> None:

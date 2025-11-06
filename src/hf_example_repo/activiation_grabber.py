@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
-import torch
+
 import numpy as np
+import torch
+
 from .subject import Subject
 
 

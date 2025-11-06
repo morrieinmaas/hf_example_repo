@@ -6,7 +6,8 @@ Integration tests for the ActivationGrabber functionality.
 
 import numpy as np
 import torch
-from hf_example_repo.activiation_grabber import ActivationGrabber, ActivationConfig
+
+from hf_example_repo.activiation_grabber import ActivationConfig, ActivationGrabber
 
 
 def test_activation_grabber_initialization(gpt2_subject):
