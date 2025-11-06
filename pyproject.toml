@@ -1,0 +1,22 @@
+[project]
+name = "hf-example-repo"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Moritz Schlichting", email = "motechnix@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "transformers",
+    "nnsight",
+    "numpy",
+    "pydantic",
+]
+
+[project.scripts]
+hf-example-repo = "hf_example_repo:main"
+
+[build-system]
+requires = ["uv_build>=0.9.7,<0.10.0"]
+build-backend = "uv_build"

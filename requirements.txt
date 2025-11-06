@@ -1,4 +1,0 @@
-transformers
-nnsight
-numpy
-pydantic
