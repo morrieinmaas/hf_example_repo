@@ -18,6 +18,12 @@ To install dependencies:
 uv sync
 ```
 
+To install development dependencies (for testing and formatting):
+
+```bash
+uv sync --extra dev --extra test
+```
+
 To run the main project:
 
 ```bash
@@ -37,3 +43,32 @@ Other available scripts:
 - `uv run hf_working_gpt2_example`
 - `uv run hf_minimal_gpt2_example`
 - `uv run hf_debug_gpt2_config`
+
+### Testing
+
+To run all tests:
+
+```bash
+uv run pytest tests/
+```
+
+To run tests with coverage:
+
+```bash
+uv run pytest tests/ --cov=hf_example_repo --cov-report=html
+```
+
+### Code Formatting
+
+To format the code using ruff:
+
+```bash
+uv run ruff format .
+```
+
+To check for linting issues:
+
+```bash
+uv run ruff check .
+```
+
