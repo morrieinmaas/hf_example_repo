@@ -8,6 +8,6 @@ class IdsInput(BaseModel):
 
 class ModelInput(BaseModel):
     text: str = ""
-    
+
     def tokenize(self, subject: Any) -> List[int]:
         return subject.tokenize(self.text)

@@ -338,13 +338,17 @@ class Subject:
 
         if stream:
             return self._generate_streaming(
-                inputs, streamer, intervention_tensors_by_layer, 
-                max_new_tokens, temperature, num_return_sequences, n_top_logprobs
+                inputs,
+                streamer,
+                intervention_tensors_by_layer,
+                max_new_tokens,
+                temperature,
+                num_return_sequences,
+                n_top_logprobs,
             )
         else:
             return self._generate_non_streaming(
-                inputs, intervention_tensors_by_layer, 
-                max_new_tokens, temperature, num_return_sequences, n_top_logprobs
+                inputs, intervention_tensors_by_layer, max_new_tokens, temperature, num_return_sequences, n_top_logprobs
             )
 
     def _generate_non_streaming(
@@ -377,15 +381,11 @@ class Subject:
                 output_ids_BT = self._collect_output_ids()
 
                 # Collect top logprobs at each token
-                local_tokenwise_log_probs = self._collect_tokenwise_logprobs(
-                    max_new_tokens, n_top_logprobs
-                )
+                local_tokenwise_log_probs = self._collect_tokenwise_logprobs(max_new_tokens, n_top_logprobs)
 
                 # Intervene as necessary
                 if intervention_tensors_by_layer is not None:
-                    self._apply_interventions(
-                        intervention_tensors_by_layer, inputs, max_new_tokens
-                    )
+                    self._apply_interventions(intervention_tensors_by_layer, inputs, max_new_tokens)
 
         tokenwise_log_probs = [
             (tokens.numpy(), log_probs.float().numpy())  # type: ignore
@@ -424,14 +424,19 @@ class Subject:
         """
         # Start generation in a separate thread
         thread, results_container = self._start_streaming_generation(
-            inputs, streamer, intervention_tensors_by_layer,
-            max_new_tokens, temperature, num_return_sequences, n_top_logprobs
+            inputs,
+            streamer,
+            intervention_tensors_by_layer,
+            max_new_tokens,
+            temperature,
+            num_return_sequences,
+            n_top_logprobs,
         )
-        
+
         # Stream tokens as they're generated
         for token_id in streamer:
             yield token_id
-            
+
         # Wait for generation to complete and get final results
         thread.join()
         final_output = self._finalize_streaming_output(results_container, inputs, num_return_sequences)
@@ -450,12 +455,8 @@ class Subject:
         """
         Start the streaming generation process in a separate thread.
         """
-        results_container = {
-            'output_ids_BT': None,
-            'log_probs_BV': None,
-            'tokenwise_log_probs': None
-        }
-        
+        results_container = {"output_ids_BT": None, "log_probs_BV": None, "tokenwise_log_probs": None}
+
         def _impl():
             with torch.no_grad():
                 with self.model.generate(  # type: ignore
@@ -468,24 +469,20 @@ class Subject:
                     validate=False,  # type: ignore
                 ):
                     # Save next-token logits and all output IDs
-                    results_container['log_probs_BV'] = self._collect_logits()
-                    results_container['output_ids_BT'] = self._collect_output_ids()
+                    results_container["log_probs_BV"] = self._collect_logits()
+                    results_container["output_ids_BT"] = self._collect_output_ids()
 
                     # Collect top logprobs at each token
-                    local_tokenwise_log_probs = self._collect_tokenwise_logprobs(
-                        max_new_tokens, n_top_logprobs
-                    )
+                    local_tokenwise_log_probs = self._collect_tokenwise_logprobs(max_new_tokens, n_top_logprobs)
 
                     # Intervene as necessary
                     if intervention_tensors_by_layer is not None:
-                        self._apply_interventions(
-                            intervention_tensors_by_layer, inputs, max_new_tokens
-                        )
+                        self._apply_interventions(intervention_tensors_by_layer, inputs, max_new_tokens)
 
-            results_container['tokenwise_log_probs'] = [
+            results_container["tokenwise_log_probs"] = [
                 (tokens.numpy(), log_probs.float().numpy())  # type: ignore
                 for i, (tokens, log_probs) in enumerate(local_tokenwise_log_probs)
-                if i < results_container['output_ids_BT'].shape[1] - len(inputs)
+                if i < results_container["output_ids_BT"].shape[1] - len(inputs)
             ]
 
         thread = threading.Thread(target=_impl)
@@ -501,10 +498,10 @@ class Subject:
         """
         Finalize the streaming output and return the GenerateOutput.
         """
-        output_ids_BT = results_container['output_ids_BT']
-        log_probs_BV = results_container['log_probs_BV']
-        tokenwise_log_probs = results_container['tokenwise_log_probs']
-        
+        output_ids_BT = results_container["output_ids_BT"]
+        log_probs_BV = results_container["log_probs_BV"]
+        tokenwise_log_probs = results_container["tokenwise_log_probs"]
+
         # Validate results
         assert output_ids_BT is not None, "output_ids not collected"
         assert log_probs_BV is not None, "log_probs not collected"
@@ -553,9 +550,7 @@ class Subject:
         """
         Collect next-token logits.
         """
-        return _ct(
-            torch.log_softmax(self.model.lm_head.output[:, -1], dim=-1).detach().cpu().save()
-        )  # type: ignore
+        return _ct(torch.log_softmax(self.model.lm_head.output[:, -1], dim=-1).detach().cpu().save())  # type: ignore
 
     def _collect_output_ids(self) -> torch.Tensor:
         """
@@ -571,7 +566,7 @@ class Subject:
         """
         local_tokenwise_log_probs: list[tuple[torch.Tensor, torch.Tensor]] = []
         iter_lm_head = self.model.lm_head
-        
+
         for i in range(max_new_tokens):
             cur_log_probs_BV = torch.log_softmax(_ct(iter_lm_head.output)[:, -1], dim=-1)
             if i == 0:
@@ -590,7 +585,7 @@ class Subject:
 
             if i < max_new_tokens - 1:
                 iter_lm_head = iter_lm_head.next()
-                
+
         return local_tokenwise_log_probs
 
     def _apply_interventions(
@@ -628,7 +623,6 @@ class Subject:
                 cur_token = len(inputs) + i_next
                 mask = tokens == cur_token
                 module.input[:, -1, neurons[mask]] = values[mask]
-
 
     def softmax_top_k(
         self,
@@ -880,7 +874,9 @@ class GPT2Config(LMConfig):
     Q_name: str = "n_head"  # Num attention heads
     K_name: str = "n_head"  # Num key/value attention heads
 
-    layernorm_fn: Callable[[torch.Tensor, torch.Tensor, torch.Tensor, float], torch.Tensor] = lambda x, y, z, eps: x  # Simple identity function for demo
+    layernorm_fn: Callable[[torch.Tensor, torch.Tensor, torch.Tensor, float], torch.Tensor] = (
+        lambda x, y, z, eps: x
+    )  # Simple identity function for demo
 
 
 gpt2_config = GPT2Config(

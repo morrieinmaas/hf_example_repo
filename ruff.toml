@@ -1,0 +1,16 @@
+# ruff configuration
+line-length = 120
+
+# Enable all rules
+[lint]
+select = ["E", "W", "F", "I", "C", "B"]
+
+# Ignore some rules
+extend-ignore = [
+    "E501",  # Line too long (handled by line-length setting)
+]
+
+# Use black style formatting for the formatter
+[format]
+quote-style = "double"
+indent-style = "space"
