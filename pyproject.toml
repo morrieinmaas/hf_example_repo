@@ -15,6 +15,12 @@ dependencies = [
     "pydantic",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+]
+
 [project.scripts]
 hf_example_repo = "main:main"
 hf_examples = "examples:main"
