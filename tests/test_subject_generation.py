@@ -4,8 +4,6 @@
 Integration tests for the Subject generation functionality.
 """
 
-import torch
-import numpy as np
 from hf_example_repo.subject import get_subject_config, make_subject
 from util.chat_input import ModelInput
 

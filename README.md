@@ -24,6 +24,12 @@ To install development dependencies (for testing and formatting):
 uv sync --extra dev --extra test
 ```
 
+To install all dependencies (project, development, and testing):
+
+```bash
+uv sync --all-extras
+```
+
 To run the main project:
 
 ```bash
