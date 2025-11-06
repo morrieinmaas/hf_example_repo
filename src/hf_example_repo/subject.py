@@ -251,19 +251,27 @@ class Subject:
         """
         Collect activations for the given layers, only including the given keys.
         """
+        input_ids, attn_mask = self._prepare_inputs(cis)
+        include_list = self._resolve_include_keys(include)
+        acts = self._trace_and_collect(input_ids, attn_mask, layers, include_list)
+        acts = self._convert_proxies_to_tensors(acts, layers, include_list)
+        return ModelActivations(**acts)
 
-        # Get tokenized and padded dataset for batch input to the model
+    def _prepare_inputs(self, cis: list[ModelInput]) -> tuple[torch.Tensor, torch.Tensor]:
+        """Prepare and validate input tensors."""
         ds = construct_dataset(self, [(ci, IdsInput(input_ids=[])) for ci in cis], shift_labels=False)
-        input_ids, attn_mask = (
-            torch.tensor([x["input_ids"] for x in ds.to_list()]),  # type: ignore
-            torch.tensor([x["attention_mask"] for x in ds.to_list()]),  # type: ignore
-        )
+        input_ids = torch.tensor([x["input_ids"] for x in ds.to_list()])  # type: ignore
+        attn_mask = torch.tensor([x["attention_mask"] for x in ds.to_list()])  # type: ignore
+
         if input_ids.shape[1] == 0:
             raise ValueError("No input tokens provided")
 
-        # If include is "*", we collect all activations
+        return input_ids, attn_mask
+
+    def _resolve_include_keys(self, include: list[str] | Literal["*"]) -> list[str]:
+        """Resolve the include parameter to a list of activation keys."""
         if include == "*":
-            include = [
+            return [
                 "resid_BTD",
                 "mlp_in_BTD",
                 "mlp_out_BTD",
@@ -273,44 +281,66 @@ class Subject:
                 "unembed_in_BTD",
                 "unembed_out_BTV",
             ]
-        else:
-            assert isinstance(include, list), "Argument `include` must be a list of strings or '*'"
+        assert isinstance(include, list), "Argument `include` must be a list of strings or '*'"
+        return include
 
+    def _trace_and_collect(
+        self,
+        input_ids: torch.Tensor,
+        attn_mask: torch.Tensor,
+        layers: list[int],
+        include: list[str],
+    ) -> dict[str, Any]:
+        """Trace model and collect activations."""
         acts: dict[str, Any] = {"layers": {}}
+
         with self.model.trace(  # type: ignore
             {"input_ids": input_ids, "attention_mask": attn_mask},  # type: ignore
             output_attentions=True,  # type: ignore
         ):
             for layer in layers:
-                layer_acts: dict[str, LanguageModelProxy] = {}
-                if "resid_BTD" in include:
-                    layer_acts["resid_BTD"] = self.layers[layer].output.detach().save()
-                if "mlp_in_BTD" in include:
-                    layer_acts["mlp_in_BTD"] = self.mlps[layer].input.detach().save()
-                if "mlp_out_BTD" in include:
-                    layer_acts["mlp_out_BTD"] = self.mlps[layer].output.detach().save()
-                if "attn_out_BTD" in include:
-                    layer_acts["attn_out_BTD"] = self.attns[layer].output.detach().save()
-                if "attn_map_BQTT" in include:
-                    layer_acts["attn_map_BQTT"] = self.attns[layer].output[1].detach().save()
-                if "neurons_BTI" in include:
-                    layer_acts["neurons_BTI"] = self.w_outs[layer].input.detach().save()
-                acts["layers"][layer] = layer_acts
+                acts["layers"][layer] = self._collect_layer_activations(layer, include)
+            self._collect_global_activations(acts, include)
 
-            if "unembed_in_BTD" in include:
-                acts["unembed_in_BTD"] = self.unembed.input.detach().save()
-            if "unembed_out_BTV" in include:
-                acts["unembed_out_BTV"] = self.unembed.output.detach().save()
+        return acts
 
-        # Convert proxies to tensors
+    def _collect_layer_activations(self, layer: int, include: list[str]) -> dict[str, LanguageModelProxy]:
+        """Collect activations for a specific layer."""
+        layer_acts: dict[str, LanguageModelProxy] = {}
+
+        activation_map = {
+            "resid_BTD": lambda: self.layers[layer].output.detach().save(),
+            "mlp_in_BTD": lambda: self.mlps[layer].input.detach().save(),
+            "mlp_out_BTD": lambda: self.mlps[layer].output.detach().save(),
+            "attn_out_BTD": lambda: self.attns[layer].output.detach().save(),
+            "attn_map_BQTT": lambda: self.attns[layer].output[1].detach().save(),
+            "neurons_BTI": lambda: self.w_outs[layer].input.detach().save(),
+        }
+
+        for key in include:
+            if key in activation_map:
+                layer_acts[key] = activation_map[key]()
+
+        return layer_acts
+
+    def _collect_global_activations(self, acts: dict[str, Any], include: list[str]) -> None:
+        """Collect global (non-layer-specific) activations."""
+        if "unembed_in_BTD" in include:
+            acts["unembed_in_BTD"] = self.unembed.input.detach().save()
+        if "unembed_out_BTV" in include:
+            acts["unembed_out_BTV"] = self.unembed.output.detach().save()
+
+    def _convert_proxies_to_tensors(
+        self, acts: dict[str, Any], layers: list[int], include: list[str]
+    ) -> dict[str, Any]:
+        """Convert nnsight proxy objects to actual tensors."""
         for key in include:
             for layer in layers:
                 if key in acts["layers"][layer]:
                     acts["layers"][layer][key] = acts["layers"][layer][key].value
             if key in acts:
                 acts[key] = acts[key].value
-
-        return ModelActivations(**acts)
+        return acts
 
     def generate(
         self,

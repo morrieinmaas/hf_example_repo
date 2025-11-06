@@ -47,7 +47,7 @@ def main() -> None:
     print(f"   Layers: {activation_config.layers}")
 
     try:
-        # Get activations
+        # Get activations using the class method
         activation_data: ActivationData = grabber.get_activations(input_sequence=input_text, config=activation_config)
 
         print("   Activations retrieved successfully!")

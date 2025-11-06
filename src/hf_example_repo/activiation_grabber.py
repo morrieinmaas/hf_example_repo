@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
@@ -42,19 +42,13 @@ class ActivationData:
         )
 
 
+@dataclass
 class ActivationGrabber:
     """
     Class to grab activations from a Subject model.
     """
 
-    def __init__(self, subject: Subject):
-        """
-        Initialize the ActivationGrabber with a Subject.
-
-        Args:
-            subject: The Subject model to grab activations from.
-        """
-        self.subject = subject
+    subject: Subject
 
     def get_activations(
         self, input_sequence: str | List[str], config: Optional[ActivationConfig] = None

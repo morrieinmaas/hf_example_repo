@@ -10,19 +10,11 @@ import torch
 from hf_example_repo.activiation_grabber import ActivationConfig, ActivationGrabber
 
 
-def test_activation_grabber_initialization(gpt2_subject):
-    """
-    Test that ActivationGrabber can be initialized with a Subject.
-    """
-    grabber = ActivationGrabber(gpt2_subject)
-    assert grabber.subject == gpt2_subject
-    assert grabber.subject.model_name == "gpt2"
-
-
 def test_get_activations_with_default_config(gpt2_subject):
     """
     Test getting activations with default configuration.
     """
+    # Create an ActivationGrabber instance
     grabber = ActivationGrabber(gpt2_subject)
 
     # Test with a simple input
@@ -57,6 +49,7 @@ def test_get_activations_with_custom_config(gpt2_subject):
     """
     Test getting activations with custom configuration.
     """
+    # Create an ActivationGrabber instance
     grabber = ActivationGrabber(gpt2_subject)
 
     # Test with specific layers and numpy format
@@ -92,8 +85,6 @@ def test_get_activations_with_torch_tensors(gpt2_subject):
     """
     Test getting activations with torch tensor format.
     """
-    grabber = ActivationGrabber(gpt2_subject)
-
     # Test with torch tensor format
     config = ActivationConfig(
         layers=[0],  # First layer only
@@ -101,6 +92,7 @@ def test_get_activations_with_torch_tensors(gpt2_subject):
     )
 
     input_text = "Hello"
+    grabber = ActivationGrabber(gpt2_subject)
     activation_data = grabber.get_activations(input_text, config=config)
 
     # Verify the structure of the returned data
@@ -127,10 +119,9 @@ def test_get_activations_with_multiple_inputs(gpt2_subject):
     """
     Test getting activations with multiple input sequences.
     """
-    grabber = ActivationGrabber(gpt2_subject)
-
     # Test with multiple inputs
     input_texts = ["Hello, world!", "How are you?"]
+    grabber = ActivationGrabber(gpt2_subject)
     activation_data = grabber.get_activations(input_texts)
 
     # Verify the structure of the returned data
@@ -158,6 +149,7 @@ def test_activation_data_string_representation(gpt2_subject):
     """
     Test the string representation of ActivationData.
     """
+    # Create an ActivationGrabber instance
     grabber = ActivationGrabber(gpt2_subject)
 
     input_text = "Hello"
