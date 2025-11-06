@@ -5,6 +5,15 @@ import numpy as np
 from .subject import Subject
 
 
+@dataclass(frozen=True)
+class ActivationConfig:
+    """
+    Configuration for activation grabbing.
+    """
+    layers: Optional[List[int]] = None
+    return_numpy: bool = True
+
+
 @dataclass
 class ActivationData:
     """
@@ -44,23 +53,25 @@ class ActivationGrabber:
     def get_activations(
         self,
         input_sequence: str | List[str],
-        layers: Optional[List[int]] = None,
-        return_numpy: bool = True
+        config: Optional[ActivationConfig] = None
     ) -> ActivationData:
         """
         Get activations for the given input sequence.
         
         Args:
             input_sequence: Input text or list of texts.
-            layers: List of layer indices to get activations for.
-            return_numpy: Whether to return numpy arrays or torch tensors.
+            config: Configuration for activation grabbing.
             
         Returns:
             ActivationData containing the activations and related information.
         """
+        if config is None:
+            config = ActivationConfig()
+            
         if isinstance(input_sequence, str):
             input_sequence = [input_sequence]
         
+        layers = config.layers
         if layers is None:
             layers = list(range(self.subject.L))
         
@@ -90,7 +101,7 @@ class ActivationGrabber:
             for layer in layers
         ], dim=1)  # Shape: (batch, layers, tokens, neurons)
         
-        if return_numpy:
+        if config.return_numpy:
             activations_BLTI = activations_BLTI.numpy()
         
         tokens_list = []
@@ -105,6 +116,6 @@ class ActivationGrabber:
             activations=activations_BLTI,  # Shape: (batch, layers, tokens, neurons)
             tokens=tokens_list,
             token_ids=token_ids_list,
-            attention_mask=attn_mask.numpy() if return_numpy else attn_mask,
+            attention_mask=attn_mask.numpy() if config.return_numpy else attn_mask,
             layers=layers,
         )

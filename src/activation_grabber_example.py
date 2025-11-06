@@ -5,7 +5,7 @@ Example script demonstrating how to use the ActivationGrabber with a Subject ins
 """
 
 from hf_example_repo.subject import get_subject_config, make_subject
-from hf_example_repo.activiation_grabber import ActivationGrabber, ActivationData
+from hf_example_repo.activiation_grabber import ActivationGrabber, ActivationData, ActivationConfig
 
 
 def main() -> None:
@@ -39,16 +39,18 @@ def main() -> None:
     input_text = "Hello, world!"
     print(f"   Input text: '{input_text}'")
     
-    # Get activations for specific layers (first and last layer)
-    layers = [0, subject.L - 1]  # First and last layer
-    print(f"   Layers: {layers}")
+    # Create activation configuration
+    activation_config = ActivationConfig(
+        layers=[0, subject.L - 1],  # First and last layer
+        return_numpy=True
+    )
+    print(f"   Layers: {activation_config.layers}")
     
     try:
         # Get activations
         activation_data: ActivationData = grabber.get_activations(
             input_sequence=input_text,
-            layers=layers,
-            return_numpy=True
+            config=activation_config
         )
         
         print("   Activations retrieved successfully!")

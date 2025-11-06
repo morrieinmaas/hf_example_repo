@@ -334,29 +334,129 @@ class Subject:
         streamer = TokenIdStreamer(cast(AutoTokenizer, self.tokenizer), verbose=verbose)
 
         # First group interventions by layer
-        intervention_tensors_by_layer: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]] | None = None
-        if neuron_interventions is not None:
-            interventions_by_layer: dict[int, list[tuple[int, int, float]]] = defaultdict(list)
-            for (layer, token, neuron), value in neuron_interventions.items():
-                interventions_by_layer[layer].append((token, neuron, value))
+        intervention_tensors_by_layer = self._prepare_interventions(neuron_interventions)
 
-            intervention_tensors_by_layer = {}
-            for layer, intervs in interventions_by_layer.items():
-                tokens, neurons, values = zip(*intervs)
-                assert all(t is not None for t in tokens), "Cannot intervene on None tokens"
-                intervention_tensors_by_layer[layer] = (
-                    torch.tensor(tokens),
-                    torch.tensor(neurons),
-                    torch.tensor(values, dtype=self.dtype),
-                )
+        if stream:
+            return self._generate_streaming(
+                inputs, streamer, intervention_tensors_by_layer, 
+                max_new_tokens, temperature, num_return_sequences, n_top_logprobs
+            )
+        else:
+            return self._generate_non_streaming(
+                inputs, intervention_tensors_by_layer, 
+                max_new_tokens, temperature, num_return_sequences, n_top_logprobs
+            )
 
+    def _generate_non_streaming(
+        self,
+        inputs: list[int],
+        intervention_tensors_by_layer: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]] | None,
+        max_new_tokens: int,
+        temperature: float,
+        num_return_sequences: int,
+        n_top_logprobs: int,
+    ) -> GenerateOutput:
+        """
+        Generate text in non-streaming mode.
+        """
         output_ids_BT: torch.Tensor | None = None
         log_probs_BV: torch.Tensor | None = None
         tokenwise_log_probs: list[tuple[NDIntArray, NDFloatArray]] | None = None
 
-        def _generate_impl():
-            nonlocal output_ids_BT, log_probs_BV, tokenwise_log_probs
+        with torch.no_grad():
+            with self.model.generate(  # type: ignore
+                inputs,  # type: ignore
+                max_new_tokens=max_new_tokens,  # type: ignore
+                temperature=temperature,  # type: ignore
+                num_return_sequences=num_return_sequences,  # type: ignore
+                scan=False,  # type: ignore
+                validate=False,  # type: ignore
+            ):
+                # Save next-token logits and all output IDs
+                log_probs_BV = self._collect_logits()
+                output_ids_BT = self._collect_output_ids()
 
+                # Collect top logprobs at each token
+                local_tokenwise_log_probs = self._collect_tokenwise_logprobs(
+                    max_new_tokens, n_top_logprobs
+                )
+
+                # Intervene as necessary
+                if intervention_tensors_by_layer is not None:
+                    self._apply_interventions(
+                        intervention_tensors_by_layer, inputs, max_new_tokens
+                    )
+
+        tokenwise_log_probs = [
+            (tokens.numpy(), log_probs.float().numpy())  # type: ignore
+            for i, (tokens, log_probs) in enumerate(local_tokenwise_log_probs)
+            if i < output_ids_BT.shape[1] - len(inputs)
+        ]
+
+        assert output_ids_BT is not None, "output_ids not collected"
+        assert log_probs_BV is not None, "log_probs not collected"
+        assert tokenwise_log_probs is not None, "tokenwise_log_probs not collected"
+
+        out_strs = [self.decode(output_ids_BT[i, len(inputs) :]) for i in range(num_return_sequences)]
+
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        return GenerateOutput(
+            output_ids_BT.numpy(),
+            log_probs_BV,
+            tokenwise_log_probs,
+            out_strs,  # type: ignore
+        )
+
+    def _generate_streaming(
+        self,
+        inputs: list[int],
+        streamer: TokenIdStreamer,
+        intervention_tensors_by_layer: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]] | None,
+        max_new_tokens: int,
+        temperature: float,
+        num_return_sequences: int,
+        n_top_logprobs: int,
+    ) -> Generator[int | None | GenerateOutput, None, None]:
+        """
+        Generate text in streaming mode.
+        """
+        # Start generation in a separate thread
+        thread, results_container = self._start_streaming_generation(
+            inputs, streamer, intervention_tensors_by_layer,
+            max_new_tokens, temperature, num_return_sequences, n_top_logprobs
+        )
+        
+        # Stream tokens as they're generated
+        for token_id in streamer:
+            yield token_id
+            
+        # Wait for generation to complete and get final results
+        thread.join()
+        final_output = self._finalize_streaming_output(results_container, inputs, num_return_sequences)
+        yield final_output
+
+    def _start_streaming_generation(
+        self,
+        inputs: list[int],
+        streamer: TokenIdStreamer,
+        intervention_tensors_by_layer: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]] | None,
+        max_new_tokens: int,
+        temperature: float,
+        num_return_sequences: int,
+        n_top_logprobs: int,
+    ) -> tuple[threading.Thread, dict]:
+        """
+        Start the streaming generation process in a separate thread.
+        """
+        results_container = {
+            'output_ids_BT': None,
+            'log_probs_BV': None,
+            'tokenwise_log_probs': None
+        }
+        
+        def _impl():
             with torch.no_grad():
                 with self.model.generate(  # type: ignore
                     inputs,  # type: ignore
@@ -368,100 +468,167 @@ class Subject:
                     validate=False,  # type: ignore
                 ):
                     # Save next-token logits and all output IDs
-                    log_probs_BV = _ct(
-                        torch.log_softmax(self.model.lm_head.output[:, -1], dim=-1).detach().cpu().save()
-                    )  # type: ignore
-                    output_ids_BT = _ct(self.model.generator.output.detach().cpu().save())  # type: ignore
+                    results_container['log_probs_BV'] = self._collect_logits()
+                    results_container['output_ids_BT'] = self._collect_output_ids()
 
                     # Collect top logprobs at each token
-                    local_tokenwise_log_probs: list[tuple[torch.Tensor, torch.Tensor]] = []
-                    iter_lm_head = self.model.lm_head
-                    for i in range(max_new_tokens):
-                        cur_log_probs_BV = torch.log_softmax(_ct(iter_lm_head.output)[:, -1], dim=-1)
-                        if i == 0:
-                            log_probs_BV = cur_log_probs_BV.detach().cpu().save()  # type: ignore
-
-                        topk_result = torch.topk(cur_log_probs_BV, k=n_top_logprobs, dim=-1)
-                        top_logprobs_BX = topk_result.values
-                        top_indices_BX = topk_result.indices
-
-                        local_tokenwise_log_probs.append(
-                            (
-                                top_indices_BX.detach().cpu().save(),  # type: ignore
-                                top_logprobs_BX.detach().cpu().save(),  # type: ignore
-                            )
-                        )
-
-                        if i < max_new_tokens - 1:
-                            iter_lm_head = iter_lm_head.next()
+                    local_tokenwise_log_probs = self._collect_tokenwise_logprobs(
+                        max_new_tokens, n_top_logprobs
+                    )
 
                     # Intervene as necessary
                     if intervention_tensors_by_layer is not None:
-                        for layer, (
-                            tokens,
-                            neurons,
-                            values,
-                        ) in intervention_tensors_by_layer.items():
-                            module = self.model.model.layers[layer].mlp.down_proj
-                            device = _ct(module.input).device
+                        self._apply_interventions(
+                            intervention_tensors_by_layer, inputs, max_new_tokens
+                        )
 
-                            # Move to the correct device
-                            tokens = tokens.to(device)
-                            neurons = neurons.to(device)
-                            values = values.to(device)
-
-                            # Intervene on things that are within the prompt
-                            mask = tokens < len(inputs)
-                            module.input[:, tokens[mask], neurons[mask]] = values[mask]
-
-                            # Intervene on things that are outside the prompt
-                            for i_next in range(max_new_tokens - 1):
-                                # Advance the nnsight object to the next token
-                                module = module.next()
-
-                                # Intervene on the current token
-                                cur_token = len(inputs) + i_next
-                                mask = tokens == cur_token
-                                module.input[:, -1, neurons[mask]] = values[mask]
-
-            tokenwise_log_probs = [
+            results_container['tokenwise_log_probs'] = [
                 (tokens.numpy(), log_probs.float().numpy())  # type: ignore
                 for i, (tokens, log_probs) in enumerate(local_tokenwise_log_probs)
-                if i < output_ids_BT.shape[1] - len(inputs)
+                if i < results_container['output_ids_BT'].shape[1] - len(inputs)
             ]
 
-        def _get_output():
-            assert output_ids_BT is not None, "output_ids not collected"
-            assert log_probs_BV is not None, "log_probs not collected"
-            assert tokenwise_log_probs is not None, "tokenwise_log_probs not collected"
+        thread = threading.Thread(target=_impl)
+        thread.start()
+        return thread, results_container
 
-            out_strs = [self.decode(output_ids_BT[i, len(inputs) :]) for i in range(num_return_sequences)]
+    def _finalize_streaming_output(
+        self,
+        results_container: dict,
+        inputs: list[int],
+        num_return_sequences: int,
+    ) -> GenerateOutput:
+        """
+        Finalize the streaming output and return the GenerateOutput.
+        """
+        output_ids_BT = results_container['output_ids_BT']
+        log_probs_BV = results_container['log_probs_BV']
+        tokenwise_log_probs = results_container['tokenwise_log_probs']
+        
+        # Validate results
+        assert output_ids_BT is not None, "output_ids not collected"
+        assert log_probs_BV is not None, "log_probs not collected"
+        assert tokenwise_log_probs is not None, "tokenwise_log_probs not collected"
 
-            gc.collect()
-            torch.cuda.empty_cache()
+        # Generate output strings
+        out_strs = [self.decode(output_ids_BT[i, len(inputs) :]) for i in range(num_return_sequences)]
 
-            return GenerateOutput(
-                output_ids_BT.numpy(),
-                log_probs_BV,
-                tokenwise_log_probs,
-                out_strs,  # type: ignore
+        # Clean up memory
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        return GenerateOutput(
+            output_ids_BT.numpy(),
+            log_probs_BV,
+            tokenwise_log_probs,
+            out_strs,  # type: ignore
+        )
+
+    def _prepare_interventions(
+        self, neuron_interventions: dict[tuple[int, int, int], float] | None
+    ) -> dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]] | None:
+        """
+        Prepare intervention tensors grouped by layer.
+        """
+        if neuron_interventions is None:
+            return None
+
+        interventions_by_layer: dict[int, list[tuple[int, int, float]]] = defaultdict(list)
+        for (layer, token, neuron), value in neuron_interventions.items():
+            interventions_by_layer[layer].append((token, neuron, value))
+
+        intervention_tensors_by_layer = {}
+        for layer, intervs in interventions_by_layer.items():
+            tokens, neurons, values = zip(*intervs)
+            assert all(t is not None for t in tokens), "Cannot intervene on None tokens"
+            intervention_tensors_by_layer[layer] = (
+                torch.tensor(tokens),
+                torch.tensor(neurons),
+                torch.tensor(values, dtype=self.dtype),
             )
 
-        if stream:
+        return intervention_tensors_by_layer
 
-            def _generator() -> Generator[int | None | GenerateOutput, None, None]:
-                thread = threading.Thread(target=_generate_impl)
-                thread.start()
-                for token_id in streamer:
-                    yield token_id
-                thread.join()
+    def _collect_logits(self) -> torch.Tensor:
+        """
+        Collect next-token logits.
+        """
+        return _ct(
+            torch.log_softmax(self.model.lm_head.output[:, -1], dim=-1).detach().cpu().save()
+        )  # type: ignore
 
-                yield _get_output()
+    def _collect_output_ids(self) -> torch.Tensor:
+        """
+        Collect all output IDs.
+        """
+        return _ct(self.model.generator.output.detach().cpu().save())  # type: ignore
 
-            return _generator()
-        else:
-            _generate_impl()
-            return _get_output()
+    def _collect_tokenwise_logprobs(
+        self, max_new_tokens: int, n_top_logprobs: int
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """
+        Collect top logprobs at each token.
+        """
+        local_tokenwise_log_probs: list[tuple[torch.Tensor, torch.Tensor]] = []
+        iter_lm_head = self.model.lm_head
+        
+        for i in range(max_new_tokens):
+            cur_log_probs_BV = torch.log_softmax(_ct(iter_lm_head.output)[:, -1], dim=-1)
+            if i == 0:
+                _ = cur_log_probs_BV.detach().cpu().save()  # type: ignore
+
+            topk_result = torch.topk(cur_log_probs_BV, k=n_top_logprobs, dim=-1)
+            top_logprobs_BX = topk_result.values
+            top_indices_BX = topk_result.indices
+
+            local_tokenwise_log_probs.append(
+                (
+                    top_indices_BX.detach().cpu().save(),  # type: ignore
+                    top_logprobs_BX.detach().cpu().save(),  # type: ignore
+                )
+            )
+
+            if i < max_new_tokens - 1:
+                iter_lm_head = iter_lm_head.next()
+                
+        return local_tokenwise_log_probs
+
+    def _apply_interventions(
+        self,
+        intervention_tensors_by_layer: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
+        inputs: list[int],
+        max_new_tokens: int,
+    ) -> None:
+        """
+        Apply interventions to the model.
+        """
+        for layer, (
+            tokens,
+            neurons,
+            values,
+        ) in intervention_tensors_by_layer.items():
+            module = self.model.model.layers[layer].mlp.down_proj
+            device = _ct(module.input).device
+
+            # Move to the correct device
+            tokens = tokens.to(device)
+            neurons = neurons.to(device)
+            values = values.to(device)
+
+            # Intervene on things that are within the prompt
+            mask = tokens < len(inputs)
+            module.input[:, tokens[mask], neurons[mask]] = values[mask]
+
+            # Intervene on things that are outside the prompt
+            for i_next in range(max_new_tokens - 1):
+                # Advance the nnsight object to the next token
+                module = module.next()
+
+                # Intervene on the current token
+                cur_token = len(inputs) + i_next
+                mask = tokens == cur_token
+                module.input[:, -1, neurons[mask]] = values[mask]
+
 
     def softmax_top_k(
         self,
