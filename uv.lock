@@ -177,6 +177,7 @@ dependencies = [
     { name = "nnsight" },
     { name = "numpy" },
     { name = "pydantic" },
+    { name = "torch" },
     { name = "transformers" },
 ]
 
@@ -185,6 +186,7 @@ requires-dist = [
     { name = "nnsight" },
     { name = "numpy" },
     { name = "pydantic" },
+    { name = "torch" },
     { name = "transformers" },
 ]
 

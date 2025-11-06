@@ -1,5 +1,5 @@
 [project]
-name = "hf-example-repo"
+name = "hf_example_repo"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -9,13 +9,14 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "transformers",
+    "torch",
     "nnsight",
     "numpy",
     "pydantic",
 ]
 
 [project.scripts]
-hf-example-repo = "hf_example_repo:main"
+hf_example_repo = "main:main"
 
 [build-system]
 requires = ["uv_build>=0.9.7,<0.10.0"]
